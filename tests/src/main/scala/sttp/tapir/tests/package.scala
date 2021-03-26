@@ -13,7 +13,9 @@ import sttp.capabilities.Streams
 import sttp.model.{Header, HeaderNames, MediaType, Part, QueryParams, StatusCode}
 import sttp.model.headers.{Cookie, CookieValueWithMeta, CookieWithMeta}
 import sttp.tapir.Codec.PlainCodec
+import sttp.tapir.SchemaType.SObjectInfo
 import sttp.tapir.model._
+import cats.syntax.option._
 
 package object tests {
   val in_query_out_string: Endpoint[String, Unit, String, Any] = endpoint.in(query[String]("fruit")).out(stringBody)
@@ -69,17 +71,22 @@ package object tests {
     .out(header[Int]("IntHeader") and stringBody)
 
   val in_json_out_json: Endpoint[FruitAmount, Unit, FruitAmount, Any] =
-    endpoint.post.in("api" / "echo")
+    endpoint.post
+      .in("api" / "echo")
       .in(jsonBody[FruitAmount])
-      .out(jsonBody[FruitAmount]).name("echo json")
+      .out(jsonBody[FruitAmount])
+      .name("echo json")
 
   val in_content_type_fixed_header: Endpoint[Unit, Unit, Unit, Any] =
-    endpoint.post.in("api" / "echo")
+    endpoint.post
+      .in("api" / "echo")
       .in(header(Header.contentType(MediaType.ApplicationJson)))
 
-  implicit val mediaTypeCodec: Codec[String, MediaType, CodecFormat.TextPlain] = Codec.string.mapDecode(_ => DecodeResult.Mismatch("", ""))(_.toString())
+  implicit val mediaTypeCodec: Codec[String, MediaType, CodecFormat.TextPlain] =
+    Codec.string.mapDecode(_ => DecodeResult.Mismatch("", ""))(_.toString())
   val in_content_type_header_with_custom_decode_results: Endpoint[MediaType, Unit, Unit, Any] =
-    endpoint.post.in("api" / "echo")
+    endpoint.post
+      .in("api" / "echo")
       .in(header[MediaType]("Content-Type"))
 
   val in_byte_array_out_byte_array: Endpoint[Array[Byte], Unit, Array[Byte], Any] =
@@ -372,6 +379,25 @@ package object tests {
       endpoint.in(jsonBody[BasketOfFruits])
     }
 
+    val in_valid_json_collection_custom_schema: Endpoint[BasketOfFruits, Unit, Unit, Any] = {
+      implicit val schemaForIntWrapper: Schema[IntWrapper] = Schema(SchemaType.SInteger).validate(Validator.min(1).contramap(_.v))
+      implicit val encoder: Encoder[IntWrapper] = Encoder.encodeInt.contramap(_.v)
+      implicit val decode: Decoder[IntWrapper] = Decoder.decodeInt.map(IntWrapper.apply)
+
+      implicit val schemaForStringWrapper: Schema[StringWrapper] =
+        Schema.string.validate(Validator.minLength(4).contramap(_.v))
+      implicit val stringEncoder: Encoder[StringWrapper] = Encoder.encodeString.contramap(_.v)
+      implicit val stringDecoder: Decoder[StringWrapper] = Decoder.decodeString.map(StringWrapper.apply)
+
+      import sttp.tapir.tests.BasketOfFruits._
+      implicit def validatedListEncoder[T: Encoder]: Encoder[ValidatedList[T]] = implicitly[Encoder[List[T]]].contramap(identity)
+      implicit def validatedListDecoder[T: Decoder]: Decoder[ValidatedList[T]] =
+        implicitly[Decoder[List[T]]].map(_.taggedWith[BasketOfFruits])
+      implicit def schemaForValidatedList[T: Schema]: Schema[ValidatedList[T]] =
+        implicitly[Schema[T]].asIterable.validate(Validator.minSize(1))
+      endpoint.in(jsonBody[BasketOfFruits])
+    }
+
     val in_valid_map: Endpoint[Map[String, ValidFruitAmount], Unit, Unit, Any] = {
       implicit val schemaForIntWrapper: Schema[IntWrapper] = Schema(SchemaType.SInteger).validate(Validator.min(1).contramap(_.v))
       implicit val encoder: Encoder[IntWrapper] = Encoder.encodeInt.contramap(_.v)
@@ -414,6 +440,31 @@ package object tests {
             }
           )
         )
+      endpoint.out(jsonBody[ColorValue])
+    }
+
+    val out_enum_object_custom: Endpoint[Unit, Unit, ColorValue, Any] = {
+      implicit val schemaForColorValue: Schema[ColorValue] =
+        Schema(
+          SchemaType.SProduct(
+            SObjectInfo("ColorValue"),
+            List(
+              FieldName("color") ->
+                Schema.string.validate(
+                  Validator.enum[Color](
+                    List(Red, Blue), {
+                      (_: Color) match {
+                        case Red  => "blue".some
+                        case Blue => "red".some
+                      }
+                    }
+                  )
+                ),
+              FieldName("value") -> Schema.schemaForInt
+            )
+          )
+        )
+
       endpoint.out(jsonBody[ColorValue])
     }
 

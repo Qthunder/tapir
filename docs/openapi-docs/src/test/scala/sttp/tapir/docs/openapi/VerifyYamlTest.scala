@@ -950,6 +950,22 @@ class VerifyYamlTest extends AnyFunSuite with Matchers {
 
     actualYamlNoIndent shouldBe expectedYaml
   }
+
+  test("should match expected yaml when using user-defined schema (co-product)") {
+    val expectedYaml = load("expected_valid_enum_object.yml")
+
+    val actualYaml = OpenAPIDocsInterpreter.toOpenAPI(Validation.out_enum_object_custom, Info("Entities", "1.0")).toYaml
+    val actualYamlNoIndent = noIndentation(actualYaml)
+    actualYamlNoIndent shouldBe expectedYaml
+  }
+
+  test("validator with list 2") {
+    val expectedYaml = load("expected_valid_body_collection.yml")
+
+    val actualYaml =
+      OpenAPIDocsInterpreter.toOpenAPI(Validation.in_valid_json_collection.in("add").in("path"), Info("Fruits", "1.0")).toYaml
+    noIndentation(actualYaml) shouldBe expectedYaml
+  }
 }
 
 case class F1(data: List[F1])
